@@ -28,7 +28,8 @@ const (
 	defaultRetryTimes = 6
 	defaultMaxLength  = 32 * 1024 * 1024
 	// defaultMaxLength = 128 // TODO 测试用的，回头删除
-	defaultTimeout = 3 // TODO http超时多少秒合适啊？
+	defaultHTTPTimeout = 3 // TODO http超时多少秒合适啊？
+	defaultInterval    = 1 // TODO 多少秒合适啊？
 )
 
 // chan 接收数据结构
@@ -64,7 +65,7 @@ var (
 // - 同一个 url 如果数据超级大，开多个协程。
 // - 全体协程都回来后，统一处理发送结果，删除发送成功的。
 func feed() {
-	tick := time.NewTicker(time.Second * 2) // 测试，回头改成1
+	tick := time.NewTicker(time.Second * defaultInterval)
 	defer tick.Stop()
 	dataCache := make([]FeedInfo, 0)
 	for {
@@ -132,7 +133,7 @@ func appendFeedInfos(data []FeedInfo) {
 // doSend 执行发送任务。
 func doSend(info *retryInfo) {
 	fmt.Println("进入 doSend 发送:")
-	fmt.Println(info.lineProtos)
+	fmt.Println("#HEAD# ", info.lineProtos, " #END#")
 	defer wg.Done()
 	req, err := http.NewRequest(http.MethodPost, info.urlStr, strings.NewReader(info.lineProtos))
 	if err != nil {
@@ -141,7 +142,7 @@ func doSend(info *retryInfo) {
 		return
 	}
 
-	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*defaultTimeout)
+	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*defaultHTTPTimeout)
 	defer ctxCancel()
 	req.WithContext(ctx)
 

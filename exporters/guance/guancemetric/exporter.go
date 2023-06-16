@@ -38,7 +38,7 @@ type exporter struct {
 	pointCh chan []*point.Point
 	encVal  atomic.Value // encoderHolder
 	// wg         sync.WaitGroup // Shutdown wait deed return
-	isShutdown atomic.Bool
+	stopped atomic.Bool
 
 	temporalitySelector metric.TemporalitySelector
 	aggregationSelector metric.AggregationSelector
@@ -88,7 +88,7 @@ func (e *exporter) Aggregation(k metric.InstrumentKind) aggregation.Aggregation 
 // The passed ResourceMetrics may be reused when the call completes. If an exporter needs to hold this data after it returns, it needs to make a copy.
 //当调用完成时，可以重用传递的ResourceMetrics。如果出口商在返回后需要保存这些数据，则需要制作一份副本。
 func (e *exporter) Export(ctx context.Context, data *metricdata.ResourceMetrics) error {
-	if e.isShutdown.Load() {
+	if e.stopped.Load() {
 		return errShutdown
 	}
 
@@ -130,7 +130,7 @@ func (e *exporter) Export(ctx context.Context, data *metricdata.ResourceMetrics)
 // The deadline or cancellation of the passed context must be honored. An appropriate error should be returned in these situations.
 //必须遵守截止日期或取消已传递的上下文。在这些情况下，应该返回适当的错误。
 func (e *exporter) ForceFlush(ctx context.Context) error {
-	if e.isShutdown.Load() {
+	if e.stopped.Load() {
 		return errShutdown
 	}
 
@@ -145,10 +145,10 @@ func (e *exporter) ForceFlush(ctx context.Context) error {
 // After Shutdown is called, calls to Export will perform no operation and instead will return an error indicating the shutdown state.
 //调用Shutdown后，对Export的调用将不执行任何操作，而是返回一个指示关闭状态的错误。
 func (e *exporter) Shutdown(ctx context.Context) error {
-	if e.isShutdown.Load() {
+	if e.stopped.Load() {
 		return errShutdown
 	}
-	e.isShutdown.Swap(true) // Set exporter shutdown
+	e.stopped.Swap(true) // Set exporter shutdown
 
 	return ctx.Err()
 }

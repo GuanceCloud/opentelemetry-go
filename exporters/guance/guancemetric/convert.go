@@ -80,8 +80,10 @@ func addHistogramMetric[N int64 | float64](histogram metricdata.Histogram[N], m 
 			return make([]*point.Point, 0) // TODO 这里出错处理要斟酌，几乎不会出错的
 		}
 
-		// Add tags.
 		tags := make(map[string]string)
+		fields := make(map[string]interface{})
+
+		// Add tags.
 		tags["scope_version"] = scopeVersion
 		// tags["description"] = m.Description // 这个不想要了
 		tags["unit"] = m.Unit
@@ -90,50 +92,41 @@ func addHistogramMetric[N int64 | float64](histogram metricdata.Histogram[N], m 
 			tags[string(kv.Key)] = kv.Value.AsString()
 		}
 
+		// Add bucket points.
 		var bound string
 		for i := 0; i < len(dp.Bounds)+1; i++ {
 			// Add tags.
-			newTags := make(map[string]string, len(tags)+1)
-			for k, v := range tags {
-				newTags[k] = v
-			}
-
 			if i == len(dp.Bounds) {
 				bound = "+Inf"
 			} else {
 				bound = fmt.Sprintf("%f", dp.Bounds[i])
 			}
-			newTags["le"] = bound
+			tags["le"] = bound // tags["le"] value will be overwritten time and time
 
 			// Add fields.
-			fields := make(map[string]interface{})
+			fields = make(map[string]interface{})
 			fields[m.Name+"_bucket"] = dp.BucketCounts[i]
 
 			// Create point.
-			pt := newPoint(scopeName, newTags, fields)
+			pt := newPoint(scopeName, tags, fields)
 			pt.SetTime(dp.Time)
 
 			points = append(points, pt)
 		}
+		delete(tags, "le")
 
-		// Add fields.
-		fields := make(map[string]interface{})
+		// Add sum points.
+		fields = make(map[string]interface{})
 		fields[m.Name+"_sum"] = dp.Sum
-
-		// Create point.
 		pt := newPoint(scopeName, tags, fields)
 		pt.SetTime(dp.Time)
-
 		points = append(points, pt)
 
-		// Add fields.
+		// Add count points.
 		fields = make(map[string]interface{})
 		fields[m.Name+"_count"] = dp.Count
-
-		// Create point.
 		pt = newPoint(scopeName, tags, fields)
 		pt.SetTime(dp.Time)
-
 		points = append(points, pt)
 	}
 

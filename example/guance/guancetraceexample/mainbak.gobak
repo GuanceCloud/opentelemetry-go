@@ -25,7 +25,7 @@ import (
 	"github.com/mitchellh/go-homedir"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/guance/guancemetric"
+	"go.opentelemetry.io/otel/exporters/guance/guancetrace"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -50,12 +50,12 @@ func main() {
 	}
 	fmt.Println("host and token:", host, token) // 回头删除
 
-	enc := guancemetric.ConvertorHolder{}
+	enc := guancetrace.ConvertorHolder{}
 
-	exporter, err := guancemetric.New(
+	exporter, err := guancetrace.New(
 		host,
 		token,
-		guancemetric.WithConvertor(enc),
+		guancetrace.WithConvertor(enc),
 		// guancemetric.WithoutTimestamps(), // 必须删掉，不然没有时间戳
 	)
 	if err != nil {
@@ -141,13 +141,13 @@ func getFromFile() (string, string) {
 
 func creatMockData(now time.Time, f float64) metricdata.ResourceMetrics {
 	res := resource.NewSchemaless(
-		semconv.ServiceName("guancetmetric-example"),
+		semconv.ServiceName("stdoutmetric-example"),
 	)
 	return metricdata.ResourceMetrics{
 		Resource: res,
 		ScopeMetrics: []metricdata.ScopeMetrics{
 			{
-				Scope: instrumentation.Scope{Name: "guance_metric_example", Version: "v0.0.1"},
+				Scope: instrumentation.Scope{Name: "example", Version: "v0.0.1"},
 				Metrics: []metricdata.Metrics{
 					{
 						Name:        "requests",
