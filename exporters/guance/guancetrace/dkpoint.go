@@ -15,7 +15,6 @@
 package guancetrace // import "go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -69,7 +68,7 @@ func buildPoints(dkSpans []*DatakitSpan) ([]*point.Point, error) {
 			pt.AddKV(v)
 		}
 
-		fmt.Println("pt.LineProto() == ", pt.LineProto())
+		// fmt.Println("pt.LineProto() == ", pt.LineProto())
 		pts = append(pts, pt)
 	}
 

@@ -45,6 +45,10 @@ You can set host and token here`
 
 func main() {
 	host, token := getHostAndToken()
+
+	// host = "http://127.0.0.1:9529" // TODO 测试代码回头删除
+	// token = ""                     // TODO 测试代码回头删除
+
 	if host == "" {
 		panic("host is empty string.")
 	}
@@ -68,7 +72,7 @@ func main() {
 	//样例一。在这里，sdk将用于创建一个Meter，并从中对代码进行测量。要模拟这种行为，请使用模拟数据直接调用export。
 	fmt.Println("样例一： ============")
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 3; i++ {
 		duration := (i % 3) + 1
 		f := float64(i+40) + float64(duration+1)/100
 		mockData := creatMockData(time.Now(), f)

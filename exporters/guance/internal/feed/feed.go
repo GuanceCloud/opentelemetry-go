@@ -15,16 +15,17 @@
 package feed // import "go.opentelemetry.io/otel/exporters/guance/internal/feed"
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 const (
+	gZipOn            = true // if gzip
 	defaultRetryTimes = 6
 	defaultMaxLength  = 32 * 1024 * 1024
 	// defaultMaxLength = 128 // TODO 测试用的，回头删除
@@ -40,16 +41,27 @@ type FeedInfo struct {
 
 // 中间整理数据缓存结构
 type tempInfo struct {
-	lineProtos string
-	urlStr     string
-	overflow   bool
+	urlStr   string
+	buf      []byte
+	npts     int
+	overflow bool
 }
+
+type bodyPayload int
+
+const (
+	payloadLineProtocol bodyPayload = iota
+)
 
 // 发送数据队列结构
 type retryInfo struct {
-	lineProtos string
-	urlStr     string
-	retryTimes int64
+	urlStr      string
+	retryTimes  int64
+	buf         []byte
+	rawLen      int
+	gZipOn      bool
+	npts        int
+	payloadType bodyPayload
 }
 
 var (
@@ -95,10 +107,10 @@ func feed() {
 }
 
 // appendFeedInfos channel 数据追加到发送队列
-func appendFeedInfos(data []FeedInfo) {
+func appendFeedInfos(feedInfos []FeedInfo) {
 
-	// 查找定位函数
-	findURLIdx := func(urlStr string, temps []tempInfo) int {
+	// 查找定位函数，以便把同类数据尽量归并在一起。
+	findURLIdxInTempInfos := func(urlStr string, temps []tempInfo) int {
 		for findIdx := 0; findIdx < len(temps); findIdx++ {
 			if urlStr == temps[findIdx].urlStr && !temps[findIdx].overflow {
 				return findIdx
@@ -109,38 +121,80 @@ func appendFeedInfos(data []FeedInfo) {
 
 	// 数据梳理、归并到中间变量temp
 	tempInfos := make([]tempInfo, 0)
-	for _, feedInfo := range data {
-		urlIdx := findURLIdx(feedInfo.URL, tempInfos)
+	for _, feedInfo := range feedInfos {
+		urlIdx := findURLIdxInTempInfos(feedInfo.URL, tempInfos)
 		if urlIdx == -1 {
-			tempInfos = append(tempInfos, tempInfo{feedInfo.LineProto, feedInfo.URL, false})
+			tempInfos = append(tempInfos, tempInfo{feedInfo.URL, []byte(feedInfo.LineProto), 1, false})
 		} else {
-			if len(tempInfos[urlIdx].lineProtos+feedInfo.LineProto) >= defaultMaxLength {
+			if len(tempInfos[urlIdx].buf)+len([]byte(feedInfo.LineProto)) >= defaultMaxLength {
 				// 字节数超标
 				tempInfos[urlIdx].overflow = true
-				tempInfos = append(tempInfos, tempInfo{feedInfo.LineProto, feedInfo.URL, false})
+				tempInfos = append(tempInfos, tempInfo{feedInfo.URL, []byte(feedInfo.LineProto), 1, false})
 			} else {
-				tempInfos[urlIdx].lineProtos = tempInfos[urlIdx].lineProtos + feedInfo.LineProto
+				tempInfos[urlIdx].npts = tempInfos[urlIdx].npts + 1
+				tempInfos[urlIdx].buf = append(tempInfos[urlIdx].buf, []byte(feedInfo.LineProto)...)
 			}
 		}
 	}
 
 	// 数据搬移到发送队列
 	for _, temp := range tempInfos {
-		retryInfos = append(retryInfos, &retryInfo{temp.lineProtos, temp.urlStr, defaultRetryTimes})
+		err := appendBody(&retryInfos, temp)
+		if err != nil {
+			fmt.Println(" error: ", err)
+			continue
+		}
 	}
+}
+
+// appendBody append a body buf into retryInfos, with gZip.
+func appendBody(retryInfos *[]*retryInfo, tempInfo tempInfo) error {
+	var err error
+	var buf []byte
+
+	nowGZipOn := gZipOn
+	if gZipOn {
+		buf, err = gZip(tempInfo.buf)
+		if err != nil {
+			buf = tempInfo.buf
+			nowGZipOn = false
+		}
+	} else {
+		buf = tempInfo.buf
+	}
+
+	retryInfo := &retryInfo{
+		urlStr:      tempInfo.urlStr,
+		retryTimes:  defaultRetryTimes,
+		buf:         buf,
+		rawLen:      len(tempInfo.buf),
+		gZipOn:      nowGZipOn,
+		npts:        tempInfo.npts,
+		payloadType: payloadLineProtocol,
+	}
+	*retryInfos = append((*retryInfos), retryInfo)
+
+	return nil
 }
 
 // doSend 执行发送任务。
 func doSend(info *retryInfo) {
 	fmt.Println("进入 doSend 发送:")
-	fmt.Println("#HEAD# ", info.lineProtos, " #END#")
+	fmt.Println("#HEAD# ", info.gZipOn, info.rawLen, info.payloadType, string(info.buf), " #END#")
 	defer wg.Done()
-	req, err := http.NewRequest(http.MethodPost, info.urlStr, strings.NewReader(info.lineProtos))
+
+	req, err := http.NewRequest(http.MethodPost, info.urlStr, bytes.NewBuffer(info.buf))
 	if err != nil {
 		fmt.Println(" error: ", err)
 		atomic.AddInt64(&info.retryTimes, -1)
 		return
 	}
+
+	if info.gZipOn {
+		req.Header.Set("Content-Encoding", "gzip")
+	}
+
+	req.Header.Set("X-Points", fmt.Sprintf("%d", info.npts))
 
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*defaultHTTPTimeout)
 	defer ctxCancel()

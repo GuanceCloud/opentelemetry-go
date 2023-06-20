@@ -112,8 +112,8 @@ func (e *Exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 
 	for _, pt := range points {
 		feedInfos = append(feedInfos, feed.FeedInfo{LineProto: pt.LineProto() + "\n", URL: e.url})
-		s := pt.LineProto()
-		fmt.Println("# pt.LineProto() == ", s)
+		// s := pt.LineProto()
+		// fmt.Println("# pt.LineProto() == ", s)
 		// break
 
 	}

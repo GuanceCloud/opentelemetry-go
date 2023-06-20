@@ -84,8 +84,8 @@ func initTracer(urlStr string) (func(context.Context) error, error) {
 func main() {
 	host, token := getHostAndToken()
 
-	host = "http://127.0.0.1:9529" // TODO 测试代码回头删除
-	token = ""                     // TODO 测试代码回头删除
+	// host = "http://127.0.0.1:9529" // TODO 测试代码回头删除
+	// token = ""                     // TODO 测试代码回头删除
 
 	if host == "" {
 		panic("host is empty string.")
