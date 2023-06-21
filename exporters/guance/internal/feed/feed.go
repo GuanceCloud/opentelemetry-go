@@ -105,6 +105,38 @@ func feed() {
 		}
 	}
 }
+func Feed(ep *EndPoint) {
+	tick := time.NewTicker(time.Second * defaultInterval)
+	defer tick.Stop()
+	dataCache := make([]FeedInfo, 0)
+	for {
+		select {
+		case f := <-FeedCh:
+			// 接收数据
+			dataCache = append(dataCache, f...)
+		case <-tick.C:
+			if len(dataCache) > 0 {
+				// 整理数据
+				appendFeedInfos(dataCache)
+				dataCache = make([]FeedInfo, 0)
+
+				// 发送数据，
+				for i := 0; i < len(retryInfos); i++ {
+					wg.Add(1)
+					go doSend(retryInfos[i])
+				}
+				wg.Wait()
+
+				// 删除发送过的数据
+				fmt.Println("执行eraseSendedInfo : ", len(retryInfos))
+				eraseSendedInfo()
+			}
+		case <-ep.stopCh:
+			close(ep.feedCh)
+			return
+		}
+	}
+}
 
 // appendFeedInfos channel 数据追加到发送队列
 func appendFeedInfos(feedInfos []FeedInfo) {

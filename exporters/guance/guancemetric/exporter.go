@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/GuanceCloud/cliutils/point"
-
 	"go.opentelemetry.io/otel/exporters/guance/internal/feed"
 	"go.opentelemetry.io/otel/internal/global"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -33,10 +31,10 @@ var errShutdown = errors.New("exporter shutdown")
 
 // exporter is an OpenTelemetry metric exporter.
 type exporter struct {
-	host    string
-	token   string
-	pointCh chan []*point.Point
-	encVal  atomic.Value // encoderHolder
+	host  string
+	token string
+	// pointCh chan []*point.Point
+	encVal atomic.Value // encoderHolder
 	// wg         sync.WaitGroup // Shutdown wait deed return
 	stopped atomic.Bool
 

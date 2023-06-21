@@ -18,27 +18,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/GuanceCloud/cliutils/point"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/stdr"
 
 	"go.opentelemetry.io/otel/exporters/guance/internal/feed"
 	"go.opentelemetry.io/otel/sdk/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 var errShutdown = errors.New("exporter shutdown")
 var zeroTime time.Time
 
-var _ trace.SpanExporter = &Exporter{}
-
 // exporter is an OpenTelemetry metric exporter.
 type Exporter struct {
-	url     string
-	pointCh chan []*point.Point
-	encVal  atomic.Value // encoderHolder
+	url    string
+	client *http.Client
+	logger logr.Logger
+	// pointCh chan []*point.Point
+	feedCh chan []feed.FeedInfo
+	encVal atomic.Value // encoderHolder
 	// wg         sync.WaitGroup // Shutdown wait deed return
 	stopped atomic.Bool
 
@@ -46,6 +52,101 @@ type Exporter struct {
 
 	encoderMu sync.Mutex
 	stoppedMu sync.RWMutex
+
+	stopedCh chan interface{}
+}
+
+var _ sdktrace.SpanExporter = &Exporter{}
+
+var emptyLogger = logr.Logger{}
+
+// config contains options for the exporter.
+type config struct {
+	client    *http.Client
+	logger    logr.Logger
+	convertor *ConvertorHolder
+	// temporalitySelector metric.TemporalitySelector
+	// aggregationSelector metric.AggregationSelector
+	redactTimestamps bool
+}
+
+// Option defines a function that configures the exporter.
+type Option interface {
+	apply(config) config
+}
+
+type optionFunc func(config) config
+
+func (fn optionFunc) apply(cfg config) config {
+	return fn(cfg)
+}
+
+// WithLogger configures the exporter to use the passed logger.
+// WithLogger and WithLogr will overwrite each other.
+func WithLogger(logger *log.Logger) Option {
+	return WithLogr(stdr.New(logger))
+}
+
+// WithLogr configures the exporter to use the passed logr.Logger.
+// WithLogr and WithLogger will overwrite each other.
+func WithLogr(logger logr.Logger) Option {
+	return optionFunc(func(cfg config) config {
+		cfg.logger = logger
+		return cfg
+	})
+}
+
+// WithClient configures the exporter to use the passed HTTP client.
+func WithClient(client *http.Client) Option {
+	return optionFunc(func(cfg config) config {
+		cfg.client = client
+		return cfg
+	})
+}
+
+// newConfig creates a validated config configured with options.
+//newConfig创建一个已验证的配置，配置有选项。
+func newConfig(options ...Option) config {
+	cfg := config{}
+	for _, opt := range options {
+		cfg = opt.apply(cfg)
+	}
+
+	// // // 好像是默认的编码，暂时屏蔽
+	// // if cfg.convertor == nil {
+	// // 	enc := json.NewEncoder(os.Stdout)
+	// // 	enc.SetIndent("", "\t")
+	// // 	cfg.convertor = &convertorHolder{convertor: enc}
+	// // }
+
+	// if cfg.temporalitySelector == nil {
+	// 	cfg.temporalitySelector = metric.DefaultTemporalitySelector
+	// }
+
+	// if cfg.aggregationSelector == nil {
+	// 	cfg.aggregationSelector = metric.DefaultAggregationSelector
+	// }
+
+	return cfg
+}
+
+// WithEncoder sets the exporter to use encoder to encode all the metric
+// data-types to an output.
+func WithConvertor(convertor Convertor) Option {
+	return optionFunc(func(c config) config {
+		if convertor != nil {
+			c.convertor = &ConvertorHolder{convertor: convertor}
+		}
+		return c
+	})
+}
+
+// WithoutTimestamps sets all timestamps to zero in the output stream.
+func WithoutTimestamps() Option {
+	return optionFunc(func(c config) config {
+		c.redactTimestamps = true
+		return c
+	})
 }
 
 // Like : exporters/stdout/stdoutmetric/exporter.go
@@ -53,14 +154,24 @@ type Exporter struct {
 //
 // If no options are passed, the default exporter returned will use a JSON
 // encoder with tab indentations that output to STDOUT.
-func New(url string, options ...Option) (trace.SpanExporter, error) {
-	cfg := newConfig(options...)
+func New(collectorURL string, opts ...Option) (*Exporter, error) {
+	u, err := url.Parse(collectorURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid collector URL %q: %v", collectorURL, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("invalid collector URL %q: no scheme or host", collectorURL)
+	}
+
+	cfg := config{}
+	for _, opt := range opts {
+		cfg = opt.apply(cfg)
+	}
 
 	exp := &Exporter{
-		url: url,
-		// pointCh:             make(chan []*point.Point, 1),
-		// temporalitySelector: cfg.temporalitySelector,
-		// aggregationSelector: cfg.aggregationSelector,
+		url:              collectorURL,
+		client:           cfg.client,
+		logger:           cfg.logger,
 		redactTimestamps: cfg.redactTimestamps,
 	}
 	exp.encVal.Store(*cfg.convertor)
@@ -119,7 +230,7 @@ func (e *Exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 	}
 
 	fmt.Println("Export发送给chan")
-	feed.FeedCh <- feedInfos
+	e.feedCh <- feedInfos
 
 	return nil
 }
@@ -132,6 +243,6 @@ func (e *Exporter) Shutdown(ctx context.Context) error {
 		return errShutdown
 	}
 	e.stopped.Swap(true) // Set exporter shutdown
-
+	close(e.stopCh)
 	return ctx.Err()
 }

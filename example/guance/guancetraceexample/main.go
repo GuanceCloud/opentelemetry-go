@@ -61,6 +61,7 @@ func initTracer(urlStr string) (func(context.Context) error, error) {
 	exporter, err := guancetrace.New(
 		urlStr,
 		guancetrace.WithConvertor(enc),
+		guancetrace.WithLogger(logger),
 		// guancetrace.WithoutTimestamps(), // 必须删掉，不然没有时间戳
 	)
 	if err != nil {
@@ -99,7 +100,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	shutdown, err := initTracer(urlStr)
+	stopCh := make(chan interface{})
+	stopedCh := make(chan interface{})
+	shutdown, err := initTracer(urlStr, stopCh, stopedCh)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -119,8 +122,9 @@ func main() {
 	// === 第二组trace
 
 	// === END 第二组trace
-	time.Sleep(time.Second * 10)
-	time.Sleep(time.Second * 1)
+	close(stopCh)
+	<-stopedCh // 等待 feed 停止完成
+	fmt.Println("END")
 }
 
 func bar(ctx context.Context) {
